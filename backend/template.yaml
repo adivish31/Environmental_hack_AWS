@@ -1,0 +1,72 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: MessWise - cook for the students who will actually eat
+
+Parameters:
+  ManagerKey:
+    Type: String
+    NoEcho: true
+    MinLength: 4
+    Description: Passcode the mess manager types to open the dashboard
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Architectures: [arm64]
+    Timeout: 10
+    MemorySize: 256
+
+Resources:
+  MessWiseTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: PK, AttributeType: S }
+        - { AttributeName: SK, AttributeType: S }
+        - { AttributeName: GSI1PK, AttributeType: S }
+        - { AttributeName: GSI1SK, AttributeType: S }
+      KeySchema:
+        - { AttributeName: PK, KeyType: HASH }
+        - { AttributeName: SK, KeyType: RANGE }
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - { AttributeName: GSI1PK, KeyType: HASH }
+            - { AttributeName: GSI1SK, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins: ['*']
+        AllowHeaders: [content-type, x-manager-key]
+        AllowMethods: [GET, POST, PUT, PATCH, OPTIONS]
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: index.handler
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref MessWiseTable
+          MANAGER_KEY: !Ref ManagerKey
+          MESS_ID: bitmesra
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref MessWiseTable }
+      Events:
+        Auth:        { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /auth, Method: GET } }
+        ListMeals:   { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /meals, Method: GET } }
+        CreateMeal:  { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /meals, Method: POST } }
+        PatchMeal:   { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /meals/{mealId}, Method: PATCH } }
+        CheckIn:     { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /meals/{mealId}/checkin, Method: PUT } }
+        Recommend:   { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /meals/{mealId}/recommendation, Method: GET } }
+        Outcome:     { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /meals/{mealId}/outcome, Method: POST } }
+        Stats:       { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /stats, Method: GET } }
+
+Outputs:
+  ApiUrl:
+    Description: Paste this into frontend/.env as VITE_API_URL
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com
